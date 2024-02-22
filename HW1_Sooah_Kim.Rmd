@@ -1,0 +1,195 @@
+---
+title: "HW1 Soo-ah Kim 3035661061"
+output: html_document
+date: "2024-02-22"
+---
+
+
+# Question 1. Faceting vs Color.
+#### This problem uses the mpg dataset, which is available in R base package. Consider the plot faceted on class produced by:
+
+```{r mpg_facet}
+  library(ggplot2)
+  ggplot(mpg, aes(x = displ, y = cty)) + geom_point() + facet_wrap(~class, nrow = 2)
+```
+
+#### Instead of faceting, use color aesthetic to draw the plot.
+
+```{r mpg_color}
+  ggplot(mpg, aes(x = displ, y = cty, color = class)) + geom_point()
+```
+
+#### What are the advantages to using faceting instead of the color aesthetic? What are the disadvantages? How might the balance change if you had a larger dataset?
+
+Some advantages of faceting is that it allows for better comparison between the distribution of each class. It is clear from the first faceted figure that the distributions of all 7 classes are vastly different from each other.
+
+On the other hand, using colour aesthetic is much powerful when we want to focus on the bigger picture, such as how the distribution as a whole looks like. It is also easier to compare and visualise in one view.
+
+However, when the dataset is larger, it is better to use faceting. This is becuase it is more difficult to recognise the distribution of different classes when there are too many colours. In this example, we have seven classes and thus seven colours in the colour aesthetic view. It is quite difficult to recognise and compare the individual class distributions.
+
+
+
+# Question 2. The faithful dataset.
+#### The problem 1 uses the faithful dataset, which is available in the R base package.
+
+#### (1) Using the faithful data set compute the average waiting time between eruptions of the Old Faithful geyser. Report your result in a sentence of the following form "The average waiting time between eruptions of the Old Faithful geyser in the data set faithful is X minutes." with X replaced by the correct value computed with inline code in your .Rmd file. Make sure to use proper markup to have Old Faithful and faithful in italics.
+
+```{r faithful_waiting}
+  library(datasets)
+  avg_waiting <- mean(faithful$waiting)
+```
+
+The average waiting time between eruptions of the *Old Faithful* geyser in the data set *faithful* is `r avg_waiting` minutes.
+
+#### (2) Compute the first four eruption durations in the faithful data sets. Use a code chunk that shows both the code and the results as produced by R. Don’t forget to include a sentence explaining what you are showing.
+
+```{r eruption_head}
+  head(faithful$eruptions, 4)
+```
+
+This code extracts and shows the first four eruption durations from the faithful data sets.
+
+#### (3) Using the head function compute the first five rows of the faithful data frame and show the result as a nicely formatted table. In this case your report should show only the table, not the code that produces it. You can start with this code chunk:
+
+```{r install_kableExtra, echo=FALSE, message=FALSE, warning=FALSE}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+#install.packages("kableExtra")
+```
+
+```{r eruption_table, echo = FALSE}
+library(knitr)
+library(kableExtra)
+
+faithful_df <- head(faithful, 5)
+kbl <- knitr::kable(faithful_df, format = "html")
+kableExtra::kable_styling(kbl, full_width = FALSE)
+```
+
+#### (4) Use the hist function to create a histogram of the eruption durations in the faithful data set.
+
+```{r eruption-histogram}
+hist(faithful$eruptions,
+     main = "Eruption Durations",
+     xlab = "Duration",
+     ylab = "Frequency"
+     )
+```
+
+
+
+# Question 3. Gun Murders in US States.
+#### A data set on gun murders within US states during 2012 is available in a CSV file at Moodle. The variables in the data set are:
+####  (1) state: US state;
+####  (2) abb: Abbreviation of US state;
+####  (3) region: Geographical US region;
+####  (4) population: State population;
+####  (5) total: Number of gun murders in state.
+  
+#### Read in the data and create a scatter plot of the number of murders (vertical axis) against population (horizontal axis). Map color to region, and use log scales for both axes. Show the resulting plot and comment on any features that you see.
+
+```{r gun_murders, warning=FALSE}
+murders <- read.csv("murders.csv")
+ggplot(murders, aes(x = population, y = total, color = region)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Population", 
+       y = "Number of Gun Murders", 
+       color = "Region", 
+       title = "Number of Gun Murders against Population")
+```
+
+One of the most noticeable features from the scatterplot is that there is a positive correlation between log of population and log of number of gun murders, which makes good sense. The greather the population, the higher the number of gun murders. 
+
+Among the regions with similar population, it seems like the Southern states have more gun murders than that of other regions. We can see this from the scatterplot by how the blue points are located higher than other points with similar population.
+
+
+
+# Question 4. New York City Airport Names.
+#### This problem refers to the data provided in the nycflights13 package. Airport codes for the three New York City airports can be computed from the origin variable in the flights table packages using unique().
+
+#### (1) Use the flights table compute average and median departure delays (as recorded in the dep_delay variable) for each of the three New York City airports, omitting missing values. Present the results as a nicely formatted table and comment on the results.
+
+```{r install_nycflights13, echo=FALSE, message=FALSE, warning=FALSE}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+#install.packages("nycflights13")
+```
+```{r nyc_airports}
+library(nycflights13)
+
+airports <- unique(flights$origin)
+print(airports)
+```
+```{r airport-delays, warning=FALSE, message=FALSE}
+library(dplyr)
+
+delays <- flights %>%
+  filter(!is.na(dep_delay)) %>%
+  group_by(origin) %>%
+  summarise(
+    average = mean(dep_delay),
+    median = median(dep_delay)
+  ) %>%
+  ungroup()
+
+knitr::kable(delays, format = "html",
+             caption = "Departure Delays for New York City Airports",
+             col.names = c("Airport", "Average", "Median"))
+```
+
+There is a great difference from the average and median values of departure delay in minutes. The average values range from 10.3 to 15.1, but the median values range from -3 to -1. This difference between the mean and the median means that the data is right-skewed. The majority of the flights are in time, or even departed slightly earlier, but some outliers with great delays pulled the average up. Since the mean is sensitive to outliers, the result turned out to have a great difference between the average and median values.
+
+#### (2) Use density plots to compare the distributions of the air time (as recorded in the air_time variable) for flights originating from each of the three New York City airports. What differences do you see? There are several options for displaying the densities:
+####  - a single plot, using color or fill and alpha to distinguish the distributions;
+####  - a faceted plot with one density per facet (think about how to arrange the facets); 
+####  - a ridge line plot.
+#### Consider all three approaches and comment on their advantages and disadvantages.
+
+
+#### _single plot_
+
+```{r single_plot, warning=FALSE}
+ggplot(flights, aes(x = air_time, fill = origin, alpha = 0.5)) +
+  geom_density() +
+  labs(title = "Air Time by Airport", x = "Air Time", y = "Density") +
+  guides(alpha = FALSE)
+
+```
+
+An advantage of using a single plot is that it is easier to compare directly and visually. However, overlapping makes it difficult to recognise the individual distributions. In this example, the regions where the three overlap is quite unrecogniseable even though I have increased the transparency alpha to 0.5.
+
+#### _faceted plot_
+
+```{r faceted_plot, warning=FALSE}
+ggplot(flights, aes(x = air_time, fill = origin, alpha=0.5)) +
+  geom_density() +
+  labs(title = "Air Time by Airport", x = "Air Time", y = "Density") +
+  facet_wrap(~ origin, scales = "free_y") +
+  guides(alpha = FALSE)
+```
+
+The faceted plot is clear with no overlapping, and it is much easier to recognise what the individual distributions look like. Another advantage is that we can either set the y-axis to be in the same scale or in different scales, depending on how we want to see it. I set the scale of y-axis to be free in this example. 
+
+However, the downsides to faced plotting is that it is difficult to compare the three plots. For example, if I want to compare the density of the three plots where the air time is 200, it is quite difficult to directly and visually compare them.
+
+#### _ridge line plot_
+
+```{r install_ggridges, echo=FALSE, message=FALSE, warning=FALSE}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+#install.packages("ggridges")
+```
+
+```{r ridge_line_plot, warning=FALSE, message=FALSE}
+library(ggridges)
+
+ggplot(flights, aes(x = air_time, y = origin, fill = origin, alpha=0.5)) +
+  geom_density_ridges() +
+  labs(title = "Air Time by Airport", x = "Air Time", y = "Airport") +
+  theme_ridges() +
+  guides(alpha = FALSE)
+
+```
+
+For ridge plot, it has the advantages of both the single plot and the faceted plot. Ridge plot allows us to see the distributions of individual classes without much overlap like a single plot. It also allows us to compare the three classes easily like a faceted plot.
+
+Some disadvantages would be that it is difficult to compare the density values (the y-axis values), since there are three separate y-axes for each class.
