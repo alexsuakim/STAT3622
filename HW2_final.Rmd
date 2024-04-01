@@ -1,0 +1,329 @@
+---
+title: "HW2"
+author: "Soo-ah Kim"
+date: "2024-03-27"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages("dslabs")
+#install.packages("ggplot2")
+#install.packages("dplyr")
+#install.packages("ggExtra")
+#install.packages("glmnet")
+#install.packages("tidyverse")
+
+
+library(dslabs)
+library(ggplot2)
+library(dplyr)
+library(ggExtra)
+library(nycflights13)
+library(glmnet)
+library(tidyverse)
+library(gridExtra)
+library(MASS)
+library(tidyr)
+
+```
+
+## 2. Self-Reported Heights
+The data set *heights* in package *dslabs* contains self-reported heights for a number of female and male students.
+
+#### Density plot 
+This density plot shows the densities of the height distributions for males and for females.
+
+```{r heights density}
+data(heights)
+
+ggplot(heights, aes(x = height, fill = sex)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density Plot of Heights by Sex",
+       x = "Height (inches)",
+       y = "Density") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal()
+```
+
+#### eCDF plot
+This eCDF plot shows the empirical cumulative distributions for the heights of the two groups.
+
+``` {r heights ecdf}
+ggplot(heights, aes(x = height, color = sex)) +
+  stat_ecdf(geom = "step") +
+  labs(title = "eCDF Plot of Heights by Sex",
+       x = "Height (inches)",
+       y = "Cumulative Density") +
+  scale_color_brewer(palette = "Set1") +
+  theme_minimal()
+```
+
+Both the density plot and the eCDF plot provide different insights.
+
+**Density Plot**: density plot shows the distribution of heights for each sex, with peaks indicating the mode of each distribution. It's easier to see the shape of the distribution, such as skewness and multi-modality. For example, we can see that both the female and male heights are normally distributed, but we can see a higher concentration of female heights.
+
+**eCDF Plot**: the eCDF plot will shows the proportion of the sample below a certain height for each sex. It makes it easier to compare quantiles between groups. For instance, you can easily see what proportion of males versus females are below 70 inches tall. As we have seen from the density plot that both are normally distributed, the shapes of females and males in the eCDF plot are also similar.
+
+
+## 3. Arrival and Departure Delays
+This part of the analysis uses the New York City 2013 data to explore how arrival delay at the destination is related to departure delay.
+
+Since there are over 300,000 flights in the dataset, we have selected a 10% sample of the rows of the flights data frame.
+
+``` {r flights sampling}
+set.seed(123) # Setting a seed for reproducibility
+flights_sample <- flights %>% sample_frac(0.1)
+```
+
+#### scatterplot: arrival delay vs departure delay
+The following scatterplot shows arrival delay against departure delay for the selected sample.
+It reveals a positive linear relationship between the two variables, indicating that flights with longer departure delays tend to also experience longer arrival delays. The data points are densely clustered in the lower-left region of the plot, showing that shorter delays are more common than longer ones. As the length of the delay increases for both departure and arrival, the data points become increasingly sparse.
+
+``` {r flights scatterplot1, warning=FALSE}
+ggplot(flights_sample, aes(x = dep_delay, y = arr_delay)) +
+  geom_point(alpha = 0.2, size = 1) +
+  labs(title = "Scatterplot of Arrival Delay vs Departure Delay",
+       x = "Departure Delay (minutes)",
+       y = "Arrival Delay (minutes)") +
+  theme_minimal()
+```
+
+#### scatterplot: arrival delay vs departure delay (with the sample with departure delays of at most 30 mins)
+Now, let's focus on the flights in the sample with departure delays of at most 30 minutes.
+The following are scatterplot and density plot for the selected data. We can see from the scatterplot a distinct shape that resembles a tadpole. There is a dense cluster in the origin that indicates a high concentration of flights that have minimal arrival and departure delays. As you move away from the origin, the density decreases and we can see a positive linear relationship between arrival delay and departure delay. 
+We can see the same characteristic in the density plot, where the density of the departure delay is highest when it is close to 0, then the density gradually decreases as the departure delay time increases.
+
+``` {r flights scatterplot2, warning=FALSE}
+flights_sample_30 <- flights_sample %>% filter(dep_delay <= 30)
+
+ggplot(flights_sample_30, aes(x = dep_delay, y = arr_delay)) +
+  geom_point(alpha = 0.2, size = 1, position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(title = "Scatterplot of Arrival Delay vs Departure Delay (up to 30 minutes)",
+       x = "Departure Delay (minutes)",
+       y = "Arrival Delay (minutes)") +
+  theme_minimal()
+```
+``` {r flights density, warning=FALSE}
+# Departure delay bands
+flights_sample_30 <- flights_sample_30 %>%
+  mutate(dep_delay_band = cut(dep_delay, breaks = seq(-5, 30, by = 5), include.lowest = TRUE))
+
+# Create the density plot
+ggplot(flights_sample_30, aes(x = arr_delay, fill = dep_delay_band)) +
+  geom_density(alpha = 0.7) +
+  labs(title = "Density Plot of Arrival Delays across Departure Delay Bands",
+       x = "Arrival Delay (minutes)",
+       y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  scale_fill_brewer(palette = "Spectral")
+```
+
+#### scatterplot with marginal density and 2D density contours
+The 2D density contours highlight areas of higher density, where a greater number of flights share similar dep_delay and arr_delay values. The contour lines are helpful since it was difficult to see the density differences in the concentrated the scatterplot despite making the points transparent through the use of *alpha*. The contour lines show that the densest part of the diagram is where the departure and arrival were slightly earlier, which is an observation that was difficult to spot in the scatterplot itself.
+The marginal density plots provide additional insights into the distribution of dep_delay and arr_delay independently.
+These plots can reveal if there are common delay times that are particularly prevalent (peaks in the density plot) or if delays are more uniformly distributed.
+The marginal plots are especially helpful for identifying the range and frequency of delays without being obscured by overplotting in the scatterplot. They both show a right-skewed distribution, which means that the tail of positive linear relationship between arrival delay and departure delay can also be observed in the marginal plots. However, it is observed from the marginal plots that the density of the departure delay is much greater than that of the arrival delay.
+
+``` {r flights mdp}
+# Assuming flights_sample_30 is already created with appropriate filtering
+p <- ggplot(flights_sample_30, aes(x = dep_delay, y = arr_delay)) +
+  geom_point(alpha = 0.2, size = 1, position = position_jitter(width = 0.3, height = 0), na.rm = TRUE) +
+  geom_density_2d(aes(color = after_stat(level)), bins = 5, na.rm = TRUE) +
+  labs(title = "Scatterplot with Jitter, Marginal Density and 2D Density Contours",
+       x = "Departure Delay (minutes)",
+       y = "Arrival Delay (minutes)") +
+  theme_minimal()
+
+# Add marginal density plots to the scatterplot with jitter
+p_final <- ggExtra::ggMarginal(p, type = "density", margins = "both", size = 5)
+
+print(p_final)
+```
+
+## 4. The Big8 Dataset
+The *Big8 dataset* contains information on 8 companies from the year 2004. The variable RETX contains the daily simple returns. For this problem we take the return of the S&P500 index (labeled sprtrn) to be the output (y), and the returns of AIG, C, COP, F, GE, GM, IBM, XOM (labeled RETX) on the same day to be inputs (X).
+
+``` {r big8}
+library(dplyr)
+library(tidyr)
+
+big8 <- read.table("big8.txt", header = TRUE)
+
+# Spread the RETX values into columns for each TICKER without including sprtrn
+big8_spread <- big8 %>%
+  dplyr::select(DATE, TICKER, RETX) %>%
+  tidyr::spread(key = TICKER, value = RETX)
+
+# Add the sprtrn values to the spread data
+big8_spread <- left_join(big8_spread, big8 %>% dplyr::distinct(DATE, sprtrn), by = "DATE")
+
+head(big8_spread)
+```
+
+#### OLS results
+
+``` {r big8 ols}
+
+X <- as.matrix(big8_spread[,!names(big8_spread) %in% c("sprtrn", "DATE")])
+y <- as.matrix(big8_spread[,c("sprtrn")])
+set.seed(1)
+
+# (i) Ordinary Least Squares (OLS)
+ols_model <- lm(y ~ X)
+
+# And for the OLS model summary:
+summary(ols_model)
+```
+
+#### Lasso regression results
+
+``` {r big8 lasso}
+set.seed(0) 
+cv_lasso <- cv.glmnet(X, y, alpha = 1)
+lasso_model <- glmnet(X, y, alpha = 1, lambda = cv_lasso$lambda.min)
+
+lasso_coef <- coef(lasso_model, s = cv_lasso$lambda.min)
+lasso_coef
+
+```
+
+#### Ridge regression results
+
+``` {r big8 ridge}
+
+# (iii) Ridge regression with cross-validation to choose the regularization parameter
+set.seed(0) # For reproducibility again
+cv_ridge <- cv.glmnet(X, y, alpha = 0)
+ridge_model <- glmnet(X, y, alpha = 0, lambda = cv_ridge$lambda.min)
+
+# Extract the coefficients from the ridge model
+ridge_coef <- coef(ridge_model, s = cv_ridge$lambda.min)
+ridge_coef
+```
+
+In the analysis conducted, both Ridge and Lasso regression techniques were applied in an attempt to refine the model by reducing the number of independent variables. However, in this instance, neither method resulted in a reduction of predictors.This outcome can be attributed to the substantial correlation observed between the returns of the individual stocks and the returns of the S&P index. Due to the high degree of collinearity, the regularization process did not eliminate any of the stock return variables, suggesting that each one shares a significant relationship with the market returns.
+
+#### Scatterplot
+Generally, as the S&P index experiences returns growth, so too do the returns of these major companies. This relationship, however, is not uniform across all entities.The observation that all company stock returns (RETX) have a positive linear correlation with the S&P index returns (sprtrn) suggests that there is a multicolinearity problem in the dataset and this is why the previous ridge regression or lasso regression were not able to reduce the number of significant variables.
+
+``` {r big8 scatterplot, warning=FALSE}
+# Define the variable names and corresponding titles for the plots
+variables <- c("AIG", "C", "COP", "F", "GE", "GM", "IBM", "XOM")
+titles <- c("AIG vs sprtrn", "C vs sprtrn", "COP vs sprtrn", "F vs sprtrn", 
+            "GE vs sprtrn", "GM vs sprtrn", "IBM vs sprtrn", "XOM vs sprtrn")
+
+# Create a list to hold the ggplot objects
+plots <- list()
+
+# Loop over the variables and create each plot, adding it to the list
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(big8_spread, aes_string(x = variables[i], y = "sprtrn")) +
+    geom_point(size=0.1) + 
+    ggtitle(titles[i]) +
+    theme_minimal() + 
+    theme(plot.title = element_text(size = 12))
+}
+
+grid.arrange(grobs = plots, nrow = 3, ncol = 3)
+```
+
+## 5. Predicting the Nikkei 225
+The goal is to predict the direction of change in the Nikkei 225 index, which is composed of 225 highly capitalized stocks trading on the Tokyo Stock Exchange, representing a broad cross-section of Japanese industries. Two inputs will be used to make our predictions. Economic growth in Japan has a close relationship with Japanese exports. The largest export target for Japan is the USA, so we use the return of S&P 500 index as one input. The other input is chosen as the change in the exchange rate of US Dollars against Japanese Yen.
+
+``` {r nikkei}
+library(dplyr)
+
+nikkei_daily <- read.table("nikkei_daily.txt", header=TRUE)
+sp_daily <- read.table("sp_daily.txt", header=TRUE)
+ex_daily <- read.table("ex_daily.txt", header=TRUE)
+
+# preprocess nikkei_daily
+nikkei_daily <- nikkei_daily %>%
+  mutate(
+    change = Value - lag(Value),
+    Date = format(as.Date(tolower(Date), format = '%d-%b-%Y'), '%Y%m%d'),
+    change = if_else(change > 0, 1, -1)
+  )
+
+#preprocess ex_daily
+ex_daily <- ex_daily %>%
+  mutate(
+    log_VALUE = log(VALUE),
+    log_diff = lag(log_VALUE, 1) - lag(log_VALUE, 2),
+    DATE = format(as.Date(DATE, format='%Y-%m-%d'), '%Y%m%d')
+  )
+
+#merge tables
+nikkei_predictors <- merge(merge(nikkei_daily, sp_daily, by.x="Date", by.y="caldt"),
+                           ex_daily, by.x="Date", by.y="DATE") %>%
+  dplyr::select(Date, change, sprtrn, log_diff) %>%
+  mutate(sp_log = sprtrn) # Rename sprtrn to sp_log during mutate
+
+nikkei_predictors <- nikkei_predictors %>%
+  filter(Date > 20050102, Date < 20080101)
+
+head(nikkei_predictors)
+```
+
+#### Scatterplot of S&P 500 Log Return and Log Exchange Rate Difference
+According to the scatterplot, there are no distinct clusters of the two classes (positive and negative) of change. There is also no clear cut between the two groups, so it may be difficult to predict the class.
+
+``` {r nikkei scatterplot}
+ggplot(nikkei_predictors, aes(x = sp_log, y = log_diff, color = as.factor(change))) +
+  geom_point() +
+  scale_color_manual(
+    values = c("1" = "blue", "-1" = "red"),
+    name = "change" 
+  ) +
+  labs(
+    x = "S&P 500 Log Return",
+    y = "Log Exchange Rate Difference",
+    title = "Scatter Plot of S&P 500 Log Return and Log Exchange Rate Difference"
+  ) +
+  theme_minimal()
+```
+
+#### Logistic regression
+
+``` {r nikkei lr}
+#logistic regression
+nikkei_predictors <- nikkei_predictors %>% 
+  mutate(change = as.factor(replace(change, change == -1, 0)))
+
+lr <- glm(change ~ sp_log + log_diff, data = nikkei_predictors, family = binomial())
+summary(lr)
+```
+
+#### LDA
+
+``` {r nikkei lda}
+lda_model <- with(nikkei_predictors, lda(change ~ sp_log + log_diff))
+lda_model
+```
+
+#### Classification error rates for both logistic regression & LDA
+
+``` {r nikkei classification_error}
+# For Logistic Regression
+nikkei_predictors$predicted_prob_lr <- predict(lr, type = "response")
+nikkei_predictors$predicted_class_lr <- ifelse(nikkei_predictors$predicted_prob_lr > 0.5, 1, 0)
+lr_classification_error <- mean(nikkei_predictors$change != nikkei_predictors$predicted_class_lr)
+
+# For LDA
+nikkei_predictors$predicted_class_lda <- predict(lda_model)$class
+lda_classification_error <- mean(nikkei_predictors$change != nikkei_predictors$predicted_class_lda)
+
+# Printing the classification error rates
+cat("Classification error rates for\n")
+cat(sprintf("Logistic Regression: %.4f\n", lr_classification_error))
+cat(sprintf("LDA: %.4f", lda_classification_error))
+```
+
+For both the logistic regression and LDA, the classification error rates are around 45%, which is roughly slightly less than half of the data. This means that neither of the models are effective in predicting the Nikkei returns. This result is as expected from the scatterplot, since there was no clear cut between the two classes as they were clustered together.
+
+
