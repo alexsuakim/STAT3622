@@ -1,0 +1,359 @@
+---
+title: "HW3"
+author: "Soo-ah Kim"
+date: "`2024-04-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(caret)
+library(ggplot2)
+library(MASS)
+library(pROC)
+library(dplyr)
+library(car)
+library(e1071)
+library(nnet)
+```
+
+# STAT3622 Data Visualisation HW3
+
+*MNIST handwritten digit analysis.* The problem studies the MNIST handwritten digit data.
+
+The webpage contains both training and test data: The mnist_train.csv file contains the 60,000 training examples and labels. The mnist_test.csv contains 10,000 test examples and labels. Each row consists of 785 values: the first value is the label (a number from 0 to 9) and the remaining 784 values are the pixel values (a number from 0 to 255).
+
+## (1) Principal Component Analysis
+
+To perform PCA, we used 10% of the original data for ease of computation, and focused on three digits, 4, 9 and 8, ignoring other digits. The following is a scatterplot of the digits represented by the first and second principal components as the two main axes.
+
+#### Preprocess Data
+
+```{r}
+# Preprocessing
+
+train <- read.csv("mnist_train.csv")
+test <- read.csv("mnist_test.csv")
+
+# Select 10% of the training and testing set
+train <- head(train, 6000)
+test <- head(test, 1000)
+
+# Filter for digits 4, 8, 9
+train_489 <- train[train$label %in% c(4, 8, 9),] # (1775, 785)
+test_489 <- test[test$label %in% c(4, 8, 9),] # (298, 785)
+
+# Filter for digits 4 and 9
+train_49 <- train[train$label %in% c(4, 9),] # (1775, 785)
+test_49 <- test[test$label %in% c(4, 9),] # (298, 785)
+
+# Combine training and testing set & standardise
+combined <- rbind(train_489, test_489) # (2068, 785)
+combined[, -1] <- combined[, -1] / 255
+```
+
+#### PCA
+The PCA scatterplot shows a pretty clear separation between 8 from 4 and 9. However, the two digits 4 and 9 overlap and is more difficult to distinguish with just the first two principal components. Thus, in the following analyses, we will focus on clsssification of the two digits 4 and 9.
+
+``` {r}
+# Perform PCA
+pca <- prcomp(combined[, -1], center = TRUE, scale. = FALSE, rank. = 20)
+
+# Adding PCA scores to the combined data frame
+combined$pca1 <- pca$x[, 1]
+combined$pca2 <- pca$x[, 2]
+
+# Visualize the first 2 principal components
+ggplot(combined, aes(x = pca1, y = pca2, color = factor(label))) +
+  geom_point(alpha = 0.7) + 
+  labs(x = "First Principal Component", y = "Second Principal Component", color = "Digits") + 
+  ggtitle("Scatterplot of Digits 4, 8, and 9 after PCA") +
+  theme_minimal()
+
+```
+
+## (2) LDA, QDA, Logistic Regression without PCA
+
+Now, we will focus on the two digits 4 and 9 to perform LDA, QDA and logistic regression for classification. For the analysis, we first preprocess the data by removing constant columns within classes and checking for near-constant features. This process is important since LDA does not perform well without removing the redundant features, especially when we are using the original digits data instead of the results of the PCA.
+
+#### Preprocess data
+
+``` {r roc, warning=FALSE, message=FALSE}
+# Prepare the data
+train_labels <- factor(train_49$label)
+test_labels <- factor(test_49$label)
+train_data <- train_49[, -1]
+test_data <- test_49[, -1]
+
+# Remove constant columns within classes
+remove_constant_features <- function(data, labels) {
+  non_constant <- sapply(unique(labels), function(l) {
+    which(apply(data[labels == l, ], 2, var) != 0)
+  })
+  non_constant_cols <- Reduce(intersect, non_constant)
+  return(data[, non_constant_cols, drop = FALSE])
+}
+
+# Clean the datasets
+train_data_cleaned <- remove_constant_features(train_data, train_labels)
+test_data_cleaned <- test_data[, colnames(train_data_cleaned)]
+
+# Checking for near-constant features
+near_constant_cols <- apply(train_data_cleaned, 2, function(x) var(x) < 1e-10)
+train_data_cleaned <- train_data_cleaned[, !near_constant_cols]
+test_data_cleaned <- test_data_cleaned[, !near_constant_cols]
+```
+
+#### LDA
+
+The LDA results report a high accuracy of 0.93.
+
+``` {r lda}
+# LDA
+lda_model <- lda(train_data_cleaned, grouping = train_labels)
+lda_pred <- predict(lda_model, test_data_cleaned)
+lda_class <- lda_pred$class
+lda_prob <- lda_pred$posterior[,2]
+
+cm <- table(True = test_labels, Predicted = lda_class)
+print(cm)
+accuracy <- sum(diag(cm)) / sum(cm)
+print(paste("Accuracy:", accuracy))
+```
+
+#### QDA
+
+The QDA results report the same high accuracy of 0.93, although the confusion matrix looks slightly different from that of LDA.
+
+``` {r}
+#QDA
+pca_result <- prcomp(train_data_cleaned, scale. = TRUE)
+sum_var_explained <- cumsum(pca_result$sdev^2 / sum(pca_result$sdev^2))
+num_components <- which(sum_var_explained >= 0.95)[1]
+train_pca <- predict(pca_result, train_data_cleaned)[, 1:num_components]
+test_pca <- predict(pca_result, test_data_cleaned)[, 1:num_components]
+
+# Apply QDA
+qda_model <- qda(train_pca, grouping = train_labels)
+qda_pred <- predict(qda_model, test_pca)
+qda_class <- qda_pred$class
+qda_prob <- qda_pred$posterior[,2]
+
+# Report confusion matrix and accuracy
+cm <- table(True = test_labels, Predicted = qda_class)
+print(cm)
+accuracy <- sum(diag(cm)) / sum(cm)
+print(paste("Accuracy:", accuracy))
+
+```
+
+#### Logistic Regression
+
+The results for logistic regression shows a decently high accuracy of 0.9 but is slightly less compared to those of LDA and QDA as shown previously.
+
+```{r, warning=FALSE}
+# Logistic Regression
+logit_model <- glm(train_labels ~ ., data = train_data_cleaned, family = binomial)
+logit_pred <- predict(logit_model, test_data_cleaned, type = "response")
+logit_class <- ifelse(logit_pred > 0.5, 9, 4)
+
+cm <- table(True = test_labels, Predicted = logit_class)
+print(cm)
+accuracy <- sum(diag(cm)) / sum(cm)
+print(paste("Accuracy:", accuracy))
+```
+
+#### ROC Cruves
+
+Below are the ROC curves for LDA, QDA and logistic regression. The plot shows that all three curves have both high sensitivity and high specificity. However, the results for LDA and QDA have greater AUC than the results for logistic regression. For logistic regression, sensitivity is slightly higher than specificity. This means that the optimal threshold for logistic regression would position where the sensitivity is higher than specificity.
+
+``` {r, message=FALSE}
+# ROC Curves
+roc_lda <- roc(test_labels, lda_prob)
+roc_qda <- roc(test_labels, qda_prob)
+roc_logit <- roc(test_labels, logit_pred)
+
+# Plotting ROC Curves
+plot(roc_lda, col = "red", main = "ROC Curves for LDA, QDA, and Logistic Regression")
+plot(roc_qda, col = "blue", add = TRUE)
+plot(roc_logit, col = "green", add = TRUE)
+legend("bottomright", legend = c("LDA", "QDA", "Logistic Regression"),
+       col = c("red", "blue", "green"), lty = 1)
+```
+
+## (3) LDA, QDA, Logistic Regression based on PCA
+
+Now, we will use the PCA scores from (1) to conduct classification. For the two digits 4 and 9, we have performed LDA, QDA and logistic regression based on the top two PCA scores obtained previously. 
+
+#### Preprocess Data
+
+```{r, warning=FALSE, message=FALSE}
+row_train <- nrow(train_489)
+row_test <- nrow(test_489)
+
+# Create training and testing set from the PCA results
+train_pca <- data.frame(label = combined$label[1:row_train], pca$x[1:row_train,])
+test_pca <- data.frame(label = combined$label[(row_train + 1):(row_train + row_test)],
+                   pca$x[(row_train + 1):(row_train + row_test),])
+
+# Filter data for labels 4 and 9
+train_pca <- train_pca[train_pca$label %in% c(4, 9),]
+test_pca <- test_pca[test_pca$label %in% c(4, 9),]
+```
+
+#### LDA
+
+We performed LDA on the PCA scores. The accuracy of 0.95 is higher than that from the LDA that was performed without PCA. This shows that PCA effectively reduced the dimensions and selected the optimal features.
+
+```{r, warning=FALSE, message=FALSE}
+# LDA Model
+lda_model <- lda(label ~ ., data = train_pca)
+y_pred <- predict(lda_model, newdata = test_pca[, -1])$class
+cm <- confusionMatrix(data = factor(y_pred, levels = c(4, 9)),
+                             reference = factor(test_pca$label, levels = c(4, 9)))
+
+# Display the confusion matrix for LDA
+print(cm$table)
+print(paste("Accuracy:", cm$overall['Accuracy']))
+```
+
+#### QDA
+
+We performed QDA on the PCA scores. The accuracy of 0.97 is higher than that from the QDA that was performed without PCA. This shows that PCA effectively reduced the dimensions and selected the optimal features.
+
+```{r, warning=FALSE, message=FALSE}
+# QDA model
+qda_model <- qda(label ~ ., data = train_pca)
+y_pred <- predict(qda_model, newdata = test_pca[, -1])$class
+cm <- confusionMatrix(data = factor(y_pred, levels = c(4, 9)),
+                             reference = factor(test_pca$label, levels = c(4, 9)))
+
+# Display the confusion matrix for QDA
+print(cm$table)
+print(paste("Accuracy:", cm$overall['Accuracy']))
+```
+
+#### Logistic Regression (Multi-class)
+
+We performed multinomial logistic regression on the PCA scores. The accuracy of 0.95 is significantly higher than that from the logistic regression that was performed without PCA. This shows that PCA effectively reduced the dimensions and selected the optimal features.
+
+```{r, warning=FALSE, message=FALSE}
+# Logistic Regression Model
+logi_model <- multinom(label ~ ., data = train_pca)
+y_pred <- predict(logi_model, newdata = test_pca[, -1])
+cm <- confusionMatrix(data = factor(y_pred, levels = c(4, 9)),
+                           reference = factor(test_pca$label, levels = c(4, 9)))
+
+# Display the confusion matrix for Logistic Regression
+print(cm$table)
+print(paste("Accuracy:", cm$overall['Accuracy']))
+```
+
+#### ROC
+
+Below are the ROC curves for LDA, QDA and logistic regression performed after PCA. The plot shows that all three curves have both high sensitivity and high specificity. All the three curves are showing greater AUC compared to the analyses done without PCA. This again shows that PCA effectively reduced the dimensions and selected the optimal features.
+
+``` {r, message=FALSE}
+# Compute probabilities for ROC analysis
+lda_prob <- predict(lda_model, newdata = test_pca[, -1], type = "response")$posterior[,1]
+qda_prob <- predict(qda_model, newdata = test_pca[, -1], type = "response")$posterior[,1]
+logi_prob <- predict(logi_model, newdata = test_pca[, -1, drop = FALSE], type = "probs")
+
+# Plot ROC
+roc_lda <- roc(test_pca$label, lda_prob)
+roc_qda <- roc(test_pca$label, qda_prob)
+roc_logi <- roc(test_pca$label, logi_prob)
+
+plot(roc_lda, col = "red", main = "ROC Curves", xlab = "False Positive Rate", ylab = "True Positive Rate")
+lines(roc_qda, col = "blue")
+lines(roc_logi, col = "green")
+legend("bottomright", legend = c("LDA", "QDA", "Logistic Regression"), col = c("red", "blue", "green"), lty = 1)
+```
+
+## (4) 3 Digits Classification: LDA, QDA, Logistic Regression, SVM
+
+Finally, we consider all three digits 4, 9, and 8 for the classification problem. Besides LDA, QDA and logistic regression, we further considered SVM for the three digits classification problem.
+
+#### Preprocess data
+
+```{r, warning=FALSE, message=FALSE}
+row_train <- nrow(train_489)
+row_test <- nrow(test_489)
+
+# Create training and testing set from the PCA results
+train_pca <- data.frame(label = combined$label[1:row_train], pca$x[1:row_train,])
+test_pca <- data.frame(label = combined$label[(row_train + 1):(row_train + row_test)],
+                   pca$x[(row_train + 1):(row_train + row_test),])
+```
+
+#### LDA
+
+We performed LDA on the PCA scores of all three digits. The accuracy of 0.91 can be considered high, although it is slightly lower than that from the LDA that was performed with just two digits.
+
+```{r, warning=FALSE, message=FALSE}
+# LDA Model
+lda_model <- lda(label ~ ., data = train_pca)
+y_pred <- predict(lda_model, newdata = test_pca[, -1])$class
+cm <- confusionMatrix(data = factor(y_pred, levels = c(4, 8, 9)),
+                             reference = factor(test_pca$label, levels = c(4, 8, 9)))
+
+# Display the confusion matrix for LDA
+print(cm$table)
+print(paste("Accuracy:", cm$overall['Accuracy']))
+```
+
+## Quadratic Discriminant Analysis (QDA)
+
+We performed QDA on the PCA scores of all three digits. The accuracy of 0.94 can be considered high, although it is slightly lower than that from the QDA that was performed with just two digits. It is still higher than the two digit classification without PCA.
+
+```{r, warning=FALSE, message=FALSE}
+qda_model <- qda(label ~ ., data = train_pca)
+y_pred <- predict(qda_model, newdata = test_pca[, -1])$class
+cm <- confusionMatrix(data = factor(y_pred, levels = c(4, 8, 9)),
+                             reference = factor(test_pca$label, levels = c(4, 8, 9)))
+
+# Display the confusion matrix for QDA
+print(cm$table)
+print(paste("Accuracy:", cm$overall['Accuracy']))
+```
+
+## Logistic Regression (Multi-class)
+
+We performed multinomial logistic regression on the PCA scores of all three digits. The accuracy of 0.92 can be considered high, although it is slightly lower than that from the logistic regression that was performed with just two digits. It is still higher than the two digit classification without PCA.
+
+```{r, warning=FALSE, message=FALSE}
+                       
+# Logistic Regression Model
+logi_model <- multinom(label ~ ., data = train_pca)
+y_pred_logi <- predict(logi_model, newdata = test_pca[, -1])
+logi_cm <- confusionMatrix(data = factor(y_pred_logi, levels = c(4, 8, 9)),
+                           reference = factor(test_pca$label, levels = c(4, 8, 9)))
+
+# Display the confusion matrix for Logistic Regression
+print(logi_cm$table)
+print(paste("Accuracy:", logi_cm$overall['Accuracy']))
+
+```
+
+## SVM
+
+We performed multinomial logistic regression on the PCA scores of all three digits. SVM had the highest accuracy among all four classification analyses for the three digit classification problem after PCA, with the accuracy of 0.96.
+
+```{r, warning=FALSE, message=FALSE}
+train_pca$label <- as.factor(train_pca$label)
+test_pca$label <- as.factor(test_pca$label)
+
+svm_model <- svm(label ~ ., data = train_pca, kernel = "radial", cost = 10, gamma = 0.1, probability = TRUE)
+y_pred_svm <- predict(svm_model, newdata = test_pca[, -1])
+svm_cm <- confusionMatrix(data = factor(y_pred_svm, levels = unique(test_pca$label)),
+                          reference = factor(test_pca$label, levels = unique(test_pca$label)))
+
+print(svm_cm$table)
+print(paste("Accuracy:", svm_cm$overall['Accuracy']))
+
+```
+
+To compare the performance of the four methods, we can see that SVM has the highest accuracy of 0.96. There could be several reasons why SVM performs best. For image data where classes can be well separated in a high-dimensional space, especially after PCA dimensionality reduction, maximising the margin through SVM can be particularly effective. Furthermore, LDA and QDA make specific assumptions about the data, such as normal distribution. However, SVMs do not make strict assumptions about data distribution, which could have resulted as an advantage over the other models, especially after PCA.
+
+
+
+
