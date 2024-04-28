@@ -1,0 +1,1055 @@
+---
+title: Nature or Nurture? Estimating Obesity Based on Physical Condition & Eating Habits
+author: "Soo-ah Kim (3035661061), Dongjun Yeom (3035666463)"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: default
+  html_document:
+    df_print: paged
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+# Import the necessary libraries
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(corrplot)
+library(knitr)
+library(tidyr)
+library(dplyr)
+library(e1071)
+library(caret)
+library(class)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(moments)
+library(coefplot)
+library(nnet)
+library(ordinal)
+library(MASS)
+```
+
+# Introduction
+
+*"Nature or Nurture?"* This is one of the most important debated
+questions in the field of human biology. Some say genetic and physical
+factors play a bigger role, and others say the environments or habits
+play a bigger role in shaping a condition in a person. In this report,
+we focused on estimating the obesity level based on physical condition
+and eating habits. Obesity considered a great threat in the developed
+economies, and is an increasing threat in the developing countries.
+According to Public Health England, 63% of adults in England were
+overweight or obese in 2015. It is an important task to find out what
+factors influence the obesity levels most and to predict the obesity
+level based on a person's physical condition and eating habits.
+
+We aim to analyse what factors play a bigger role in the obesity level
+of a person, using various machine learning models, such as logistic
+regression, k-nearest neighbours, naive bayes analysis, support vector
+machine, decision tree and random forest. As our target variable is ordinal, We further employed linear and polynomial regressions after converting the obesity level into numeric scale.
+
+# About the Data
+
+```{r import_data}
+# Import data
+
+data <- read.csv("obesity.csv")
+head(data)
+```
+
+We employed 2,111 records for the estimation of obesity levels in
+individuals from the countries of Mexico, Peru and Colombia, based on
+their eating habits and physical condition. The original data was
+donated to the UC Irvine Machine Learning Repository and can be found
+from the following link.
+
+<https://archive.ics.uci.edu/dataset/544/estimation+of+obesity+levels+based+on+eating+habits+and+physical+condition>
+
+# Attributes
+
+```{r}
+# Add BMI into consideration
+
+data$BMI <- with(data, Weight / (Height^2))
+head(data)
+```
+
+*Note:* The original dataset contained 17 attributes, and 1 attribute
+has been added for the analysis.
+
+The following attributes were considered for the analyses:
+
+1.  *The attributes related with the physical condition:*
+
+> -   Gender
+> -   Age
+> -   Height
+> -   Family History with Obesity
+> -   Body Mass Index (BMI)
+
+2.  *The attributes related with eating habits:*
+
+> -   Frequent consumption of high caloric food (FAVC)
+> -   Frequency of consumption of vegetables (FCVC)
+> -   Number of main meals (NCP)
+> -   Consumption of food between meals (CAEC)
+> -   Whether they smoke cigarettes (SMOKE)
+> -   Consumption of water daily (CH20)
+> -   Consumption of alcohol (CALC)
+> -   Calories consumption monitoring (SCC)
+> -   Physical activity frequency (FAF)
+> -   Time using technology devices (TUE)
+> -   Transportation used (MTRANS)
+
+# Exploratory Data Analysis
+
+## Bar Plot
+
+```{r, warning=FALSE}
+#bar chart
+
+# Set the factor levels for obesity level in ascending order
+data$NObeyesdad <- factor(data$NObeyesdad,
+levels = c("Insufficient_Weight", "Normal_Weight", "Overweight_Level_I", "Overweight_Level_II", "Obesity_Type_I", "Obesity_Type_II", "Obesity_Type_III" ))
+
+# Plot
+ggplot(data, aes(x = NObeyesdad, fill = ..count..)) + 
+  geom_bar() +
+  coord_flip() +
+  labs(x = "Count", y = "Obesity Level", title = "Distribution of Obesity Levels") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+In figure 1, the bar plot above indicates the distribution of the data.
+Based on the Body Mass Index calculated, the data was classified into 7
+categories:
+
+> -   Insufficient_Weight: Less than 18.5
+>
+> -   Normal_Weight: 18.5 to 24.9
+>
+> -   Overweight_Level_I: 25.0 to 27.4
+>
+> -   Overweight_Level_II: 27.5 to 29.9
+>
+> -   Obesity_Type_I: 30.0 to 34.9
+>
+> -   Obesity_Type_II: 35.0 to 39.9
+>
+> -   Obesity_Type_III: Higher than 40
+
+The distribution of obesity level shows no class imbalance, with each of
+the classes having similar numbers of instances all ranging from 250 to
+350. This might indicate a sampling bias due to the difference with the
+real world distribution, which is more or less bell-curved, as shown in
+Figure 2 below (Al-Malki et al., 2003).
+
+However, having less class imbalance might actually work as an advantage
+in our analysis. Models trained on balanced data are less likely to
+overfit to the majority class. They are more likely to generalize better
+to unseen data since they have had the opportunity to learn
+representative features from all classes equally.
+
+![Figure 2. Real-world BMI distribution (Al-Malki et al.,
+2003)](images/clipboard-488641534.png){width="542"}
+
+## Correlation Plot
+
+```{r}
+# correlation heatmap for numeric columns
+
+numeric_columns <- sapply(data, is.numeric) & !names(data) %in% 'NObeyesdad'
+numeric_data <- data[numeric_columns]
+
+cor_matrix <- cor(numeric_data)  
+
+corrplot(cor_matrix, method = "color", 
+         tl.col = "black",
+         addCoef.col = "black")
+```
+
+The above correlation plot presents the inter-relationships between a
+set of variables. The matrix reveals a positive correlation between
+*Weight* and *BMI*, where 0.93 signifies a strong direct relationship.
+Similarly, *Height* and *Weight* shows a moderate strong positive
+correlation with a coefficient of 0.46, implying that *height* is a
+contributing factor to *weight*. This is explainable since *BMI* is
+calculated by the following equation:
+
+$$
+BMI = \frac {weight(Kg)} {height(m) ^2}
+$$
+
+Due to the high correlation, we decided not to include *BMI* as a
+variable in the following analyses to prevent multicollinearity
+problems.
+
+On the other hand, a moderate negative correlation with a coefficient of
+-0.3 is observed between *TUE* and *FAF*, indicating that an increase in
+one may correspond with a decrease in the other. For other pairs, they
+exhibited relatively weak correlations, coefficients being lower than
+0.3 in absolute manner, suggesting negligible linear associations.
+
+For better visualisation, our correlation plot employs the colour scale:
+darker shades of blue represent stronger positive correlations and
+darker shades of red denote stronger negative correlations.
+
+## Pairwise Plot
+
+```{r}
+# pairwise plot of selected columns
+
+ppcor <- function(x, y, ...) {
+  points(x, y, ...) 
+  abline(lm(y ~ x), col = "red")
+}
+
+selected_data <- data[, c("Age", "FCVC", "NCP", "CH2O", "FAF", "BMI")]
+pairs(selected_data, panel = ppcor)
+```
+
+The above pairwise plot examines the potential correlations between the
+selected variables, including *Age, FCVC, NCP, CH2O, FAF*, and *BMI*.
+The red linear regression lines within each scatterplot serve as a
+reference to estimate the linearity between variables. While the
+regression lines are mostly flat for all the scatterplots, suggesting a
+weak linear relationship, the *Age* and *BMI* shows a gradual positive
+linearity. This further supports the decision to eliminate *BMI* to
+prevent multicollinearity. Overall, while some linear relationship may
+exist, it is not strong or consistent across all variable pairs. Thus,
+other than *BMI*, there are no further variables to remove in order to
+prevent strong multicollinearity between variables.
+
+## QQ-Plots
+
+```{r}
+# QQ-plots
+
+# Define the columns you want to plot
+columns_to_plot <- c("Age", "Height", "Weight")
+
+# Check if all specified columns exist in the data
+if (!all(columns_to_plot %in% names(data))) {
+  stop("One or more specified columns do not exist in the dataset.")
+}
+
+# Plotting each selected column
+par(mfrow = c(1, length(columns_to_plot)))  # Arrange plots in a single row
+for (col in columns_to_plot) {
+    qqnorm(data[[col]], main = paste("QQ-plot of", col))
+    qqline(data[[col]], col = "steelblue")  # Add a reference line
+}
+par(mfrow = c(1, 1))  # Reset plot layout
+```
+
+```{r}
+# Shapiro-Wilk Test
+shapiro.test(data$Age)
+
+# Kurtosis
+kurtosis(data$Age)
+```
+
+From the QQ-plot, we can see that the variables *height* and *weight*
+generally follows the normal distribution line, but *age* doesn't seem
+to quite follow a normal distribution. To check the deviance from normal
+distribution of the variable *age*, we performed the Sapiro-Wilk
+normality test and the kurtosis test.
+
+#### Shapiro-Wilk Normality Test
+
+The W-statistic value of W = 0.86606 indicates how well the data
+conforms to a normal distribution. A value closer to 1 would indicate
+data that more closely follows a normal distribution. A value of 0.86606
+suggests a noticeable deviation from normality. The p-value \< 2.2e-16
+is highly significant, which strongly rejects the null hypothesis that
+the data are normally distributed. This result confirms that the
+distribution of Age significantly deviates from a normal distribution.
+
+#### Kurtosis
+
+The reported kurtosis value of 5.816858 indicates that the distribution
+has heavier tails than a normal distribution (which has a kurtosis of
+3). This leptokurtic nature is consistent with the QQ-plot observation
+where both tails were above the normal line, suggesting more extreme
+values in the tails than expected under normality.
+
+## Box Plots for Numeric and Nominal Variables
+
+```{r}
+# Box Plots
+
+# Loop through the numeric columns to create box plots
+for (variable_name in names(numeric_data)) {
+  p <- ggplot(data, aes_string(x = 'NObeyesdad', y = variable_name, fill = 'NObeyesdad')) +
+    geom_boxplot() +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = paste("Box plot of", variable_name, "by NObeyesdad"),
+         x = "Obesity Category",
+         y = variable_name)
+
+  print(p)
+}
+```
+
+#### *Box Plot of Age by NObeyesdad*
+
+The median *ages* for all categories are normally in the early twenties,
+with a slight upward trend as the categories progress from
+*Insufficient_Weight* towards *Obesity_Type_III*. Additionally,
+regarding the widening interquartile ranges, the box plot portrays an
+increasing variability of *age* distribution in the *overweight* and
+*obese* categories compare to the *Normal* and *Insufficient weights*,
+suggesting a greater diversity in the ages of individuals as the
+severity of obesity increases. Moreover, the existence of outliers
+across all categories indicates that there are ages that deviate
+significantly from the median, leading to the complexity and variability
+of *age* within classification.
+
+#### *Box Plot of Height by NObeyesdad*
+
+The median *height* is consistent across categories, mostly lying
+between approximately 1.65 and 1.75. The IQR, the middle 50% of the
+data, are considered stable across categories, proposing a little
+variation in *height* regardless of *weight*. The absence of notable
+differences in median *height* across *weight* categories shows that
+height may not be serve as a strong indicator of obesity status.
+
+#### *Box Plot of Weight by NObeyesdad*
+
+The box Plot of Weight by NObeyesdad shows an ascending order, median
+*weight*s increasing, indicating a positive correlation between the
+severity of category and median *weight*. Regarding the IQR, the size of
+the box are consistent across categories, except for *Obesity_Type_III*.
+Broader IQR may suggest the greater *weight* variation. For
+*Overweight_Level_II*, *Obesity_Type_II*, and *Obesity_Type_III*
+displays a presence of outliers.
+
+#### *Box Plot of FCVC by NObeyesdad*
+
+The median appears to decrease as the *level of obesity* increases. The
+IQR is larger in the Insufficient Weight compare to the other
+categories, implying greater variability. Outliers exclusively exist in
+the *Obesity_Type_I*, suggesting that individual cases with FCVC
+measurements for *Obesity_Type_I* are lower than the others. There is an
+apparent decreasing trend of median, but the relationship is not linear,
+which can be seen by the increase in median *FCVC* for the
+*Obesity_Type_II* compared to *Type_I*.
+
+#### *Box Plot of NCP by NObeyesdad*
+
+The median *NCP* of *Insufficient-Weight* rated 3, with a relatively
+compact size of IQR, leading to a less variability. The rest of
+categories has shown similar median *NCP* values, close to 3. The IQR
+was relatively longer in *Overweight_Level_I, Overweight_Level_II,* and
+*Obesity_Type_I*. As most of the categories has exhibited outliers, we
+assume that individual cases within *NCP* significantly differ from the
+norm.
+
+#### *Box Plot of CH2O by NObeyesdad*
+
+The median values for each category are mostly consistent, suggesting
+that *CH2O* may not notably vary among all the individuals. This
+uniformity further suggests that *CH2O* may not serve as a significant
+factor influencing the differences in obesity levels. The IQRs are
+comparable among the categories, further supports a homogeneous *CH2O*
+pattern across the obesity levels.
+
+#### *Box Plot of FAF by NObeyesdad*
+
+The plot illustrates a slight decreasing trend in the median value, with
+*Insufficient_Weight* rating the highest median, while
+*Obesity_Type_III* having the lowest. The IQRs have shown similarity
+across the categories indicating a consistency in the spread of *FAF*
+values within each obesity level. The box plot for *Obesity_Type_II*
+presents the narrowest IQR with same median as others, implying less
+variability within this group, further supporting the possibility that
+the individuals with *Obesity_Type_II* may contain a subgroup with
+higher physical activity levels. Or else, it may reflect a limitation.
+Overall, regarding the box plots, the correlation between lower physical
+activity levels and higher *obesity levels* are likely to be promoted.
+
+#### *Box Plot of TUE by NObeyesdad*
+
+The median TUE appears to differ across the obesity levels. The
+interquartile range for Obesity_Type_III is narrower compared then
+categories, suggesting less variability in TUE among individuals within
+the group. The noticeable trends, such as the linearity within median,
+is not noticeable in this box plot.
+
+#### *Box Plot of BMI by NObeyesdad*
+
+The median *BMI* increases with each category. The IQR within each
+category are also significantly narrow. Although some categories
+presents the potential outliers, the box plot displays clear correlation
+between *BMI* and *obesity level*, supporting that the individuals with
+higher *BMI* are likely to fall into higher *obesity*.
+
+## Bar Charts for Binary and Categorical Variables
+
+```{r}
+#plot categorical variables by obesity level
+
+#change order of categorical variables
+data$CAEC <- factor(data$CAEC, levels = c("no", "Sometimes", "Frequently", "Always"))
+data$CALC <- factor(data$CALC, levels = c("no", "Sometimes", "Frequently", "Always"))
+data$MTRANS <- factor(data$MTRANS, levels = c("Walking", "Bike", "Motorbike",
+                                              "Public_Transportation", "Automobile"))
+
+# Identify the categorical and binary columns
+categorical_columns <- sapply(data, function(x) is.factor(x) || is.character(x) || length(unique(x)) == 2)
+categorical_data <- data[categorical_columns]
+
+# Loop through the categorical columns to create bar charts
+for (variable_name in names(categorical_data)) {
+  if (variable_name != "NObeyesdad") {
+    p <- ggplot(data, aes_string(x = variable_name, fill = 'NObeyesdad')) +
+      geom_bar(position = "fill") + 
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      labs(title = paste("Bar chart of", variable_name, "by NObeyesdad"),
+           x = variable_name,
+           y = "Proportion")
+  
+    print(p)
+  }
+}
+```
+
+#### *Bar Chart of Gender by NObeyesdad*
+
+The stacked bar chart depicts the gender-based distribution on 7
+*obesity levels*. The vertical axis represents the proportion of obesity
+classifications within *gender*. For females, *Obesity_Type_III*
+constitutes the majority, followed by *Insufficient_Weight,* while
+*Obesity_Type_II* is predominant in males. Regarding the the smallest
+proportions, females barely had *Overweight_II*, while males were hardly
+underweight. Overall, the above bar chart clearly illustrates the
+*gender* disparities within weight distributions, with a higher
+proportion of females in the lower eight category and a higher
+proportion of males in the overweight categories.
+
+#### *Bar Chart of Family_history by NObeyesdad*
+
+The bar chart depicts the *family history of obesity* distribution on 7
+*obesity levels*. There is a stark difference between the group with
+*family history* and the group without. More than 70% of the group with
+*family history* are overweight or obese, while less than 30% of the
+group without any *family history* are overweight or obese.
+
+#### *Bar Chart of FAVC by NObeyesdad*
+
+The bar chart depicts the *FAVC (frequency of consuming high caloric
+food)* distribution on 7 *obesity levels*. There is a clear difference
+between the group that does consume high caloric food frequently and the
+group that does not. More than 75% of the group that responded that they
+consume high caloric food frequently are overweight or obese, while less
+than 50% of the group that responded that they don't are overweight or
+obese.
+
+#### *Bar Chart of CAEC by NObeyesdad*
+
+The bar chart depicts the *CAEC (consumption of food between meals)*
+distribution on 7 *obesity levels*. There is a clear difference between
+the four groups of different *CAEC* levels, but the result is
+interesting since it is slightly counter-intuitive. *Sometimes* was the
+most common answer for samples that are overweight or obese, and for the
+responses *frequently* and *always*, the percentage of overweight and
+obese samples drop significantly. On the other hand, *frequently* and
+*always* were the two most common responses for *normal weight* samples.
+
+#### *Bar Chart of SMOKE by NObeyesdad*
+
+The bar chart depicts the *SMOKE (whether they smoke cigarettes)*
+distribution on 7 *obesity levels*. The result is interesting. The group
+that does not smoke have almost a uniform number of instances for every
+obesity level. However, in the group that does smoke, there are a lot of
+*normal_weight* and *obesity_type_II* samples.
+
+#### *Bar Chart of SCC by NObeyesdad*
+
+The bar chart depicts the *SCC (calories consumption monitoring)*
+distribution on 7 *obesity levels*. For the group that does not monitor
+calorie intake, the number of instances for every obesity level was near
+uniform. However, for the group that does track calorie intake, more
+than 90% were in the range between *insufficient weight* to
+*overweight_level_I*.
+
+#### *Bar Chart of CALC by NObeyesdad*
+
+The bar chart depicts the *CALC (consumption of alcohol)* distribution
+on 7 *obesity levels*. An interesting result is that none of the obese
+instances were included in the group that always consume alcohol. Most
+of them were included in the group that does not or only sometimes drink
+alcohol.
+
+#### *Bar Chart of MTRANS by NObeyesdad*
+
+The bar chart depicts the *MTRANS (mode of transportation)* distribution
+on 7 *obesity levels*. For the MTRANS group that usually walks, the
+overweight to obese instances make up less than 30%. For the groups that
+usually rides the bicycle or the motorcycle, the overweight to obese
+instances make up less than 50%. However, for the groups that usually
+take public transportation or the automobile, the percentage goes up to
+nearly 75%. We can interpret this as the mode of transportation plays
+quite an important role in the obesity level, and the more active the
+mode of transportation is, the less obese the individual is likely to
+be.
+
+# Data Modelling and Analysis
+
+After performing exploratory data analysis, we performed machine
+learning models to classify the obesity level. We first performed
+classification by considering the different levels of obesity as
+categories. Then we performed some regression methods by considering the
+obesity level as ordinal.
+
+## Data Preprocessing
+
+To preprocess the data, we divided the dataset into 80% training set and
+20% testing set. To further handle the data, we normalised the numeric
+variables and converted factors to dummy variables for the categorical
+variables.
+
+```{r}
+# Preprocessing
+set.seed(123)
+
+# Preprocess numerical data: normalise, handle categorical variables, etc.
+preprocess_params <- preProcess(data[, -which(names(data) %in% c("BMI"))], method = c("center", "scale"))
+normalized_data <- predict(preprocess_params, data[, -which(names(data) %in% c("BMI"))])
+
+#train vs test
+index <- createDataPartition(normalized_data$NObeyesdad, p = 0.8, list = FALSE)
+train_set <- normalized_data[index, ]
+test_set <- normalized_data[-index, ]
+
+# X_train & X_test
+X_train <- train_set[, -which(names(train_set) == "NObeyesdad")]
+X_test <- test_set[, -which(names(test_set) == "NObeyesdad")]
+y_train <- train_set[["NObeyesdad"]]
+y_test <- test_set[["NObeyesdad"]]
+
+
+# Convert factors to dummy variables
+dummies <- dummyVars(" ~ .", data = X_train)
+X_train <- predict(dummies, newdata = X_train)
+X_test <- predict(dummies, newdata = X_test)
+```
+
+## Multinomial Logistic Regression
+
+```{r, warning=FALSE}
+# Multinomial logistic regression 
+#(instead of linear regression since the target variable NObeyesdad is categorical)
+
+# Convert all categorical variables to factors
+categorical_columns <- sapply(data, function(x) is.character(x) || length(unique(x)) < 10)
+data[categorical_columns] <- lapply(data[categorical_columns], factor)
+
+# Fit the multinomial logistic regression model
+# 'NObeyesdad' is the target, and all other columns are predictors
+multinom_model <- multinom(NObeyesdad ~ ., data = data)
+
+# Summary of the model
+summary(multinom_model)
+
+```
+
+$$
+DegreesOfFreedom = NumObservations - NumParameters = 2111 - 24 = 2087
+$$
+
+Since the target variable NObeyesdad is categorical, we performed
+Multinomial Logistic Regression. The coefficients examine the log-odds
+impact of predictors such as gender, age, height, weight, and family
+history of overweight. Positive coefficients represent the increased
+odds and negative coefficients indicate the decreased odds relative to a
+reference group. The 'GenderMale' predictor is positively associated
+with higher weight categories, meaning that males are likely to have
+increased odds of being in 'Overweight_Level_I' and 'Obesity_Type_I'
+categories than reference female group. Regarding the residual deviance,
+a lower value generally indicates a better fit. As residual deviance is
+significantly smaller than the degree of freedom of 2,087, we assume the
+model is a very good fit. Likewise, AIC is also preferable once it has
+lower values. The given value of 506.2212, seems competitive enough, but
+it has to be further tackled with other models.
+
+## K-Nearest Neighbors
+
+```{r}
+# Fit the KNN model using the base 'knn' function since 'knn3' is not a standard function
+set.seed(123) # for reproducible results
+knn_fit <- knn(train = X_train,
+               test = X_test,
+               cl = y_train, k = 5)
+
+
+#confusion matrix
+confusionMatrix <- table(Predicted = knn_fit, Actual = y_test)
+confusion_data <- as.data.frame(as.table(confusionMatrix))
+
+# Create the heatmap
+ggplot(confusion_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") + 
+  scale_fill_gradient(low = "steelblue", high = "red") + 
+  geom_text(aes(label = sprintf("%d", Freq)), vjust = 1) + 
+  theme_minimal() + 
+  labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+As obesity levels may have patterns where related features, including
+eating habits and physical conditions, lead to similar obesity levels,
+we employed a similarity-based prediction method, KNN. The confusion
+matrix illustrates the model's predictions across various obesity
+levels. The diagonal cells represent the correctly classified instances.
+The model evaluation appears to encounter the issues with some classes
+not being predicted, which led to zero denominators when generating
+evaluation metrics. In order to address such issue, micro-averaged
+metrics were employed as it ensures a more robust evaluation.
+
+```{r}
+# Convert factors to a confusion matrix object
+conf_matrix <- confusionMatrix(data = knn_fit, reference = test_set$NObeyesdad)
+
+# Print the overall accuracy
+cat("Accuracy:", conf_matrix$overall['Accuracy'], "\n")
+
+# Calculate micro-average metrics 
+positive_class <- levels(test_set$NObeyesdad)[1]
+
+micro_precision <- sum(conf_matrix$table[1, 1]) / sum(conf_matrix$table[, 1])
+micro_recall <- sum(conf_matrix$table[1, 1]) / sum(conf_matrix$table[1, ])
+micro_f1_score <- 2 * (micro_precision * micro_recall) / (micro_precision + micro_recall)
+
+cat("Micro-averaged Precision:", micro_precision, "\n")
+cat("Micro-averaged Recall:", micro_recall, "\n")
+cat("Micro-averaged F1-Score:", micro_f1_score, "\n")
+```
+
+As shown, the metrics used to examine the performance of the model
+across multiple classes are calculated. The overall accuracy of the
+model is 0.8285714, with errors occurring between some classes,
+particularly adjacent classes such as *Normal_Weight* and
+*Overweight_Level_I*. The micro-average precision is 0.9259259.
+suggesting that most of the instances predicted as a positive class were
+likely positive. The micro-average recall is 0.78125. This indicates
+that the model was able to retrieve 78.12% of actual positive instances.
+The F1-score. the harmonic mean of Precision and Recall, was 0.8474576.
+The high recall and F1 score support the model's robustness in
+identifying the correct classes. The higher values of these metrics
+confirms the good performance of the model.
+
+## Naive Bayes
+
+```{r}
+# Naive Bayes model
+nb_model <- naiveBayes(X_train, y_train)
+nb_predictions <- predict(nb_model, newdata = X_test)
+
+# Create a confusion matrix
+confusionMatrix <- table(Predicted = nb_predictions, Actual = y_test)
+confusion_data <- as.data.frame(as.table(confusionMatrix))
+
+# Create the heatmap
+ggplot(confusion_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") + 
+  scale_fill_gradient(low = "steelblue", high = "red") + 
+  geom_text(aes(label = sprintf("%d", Freq)), vjust = 1) + 
+  theme_minimal() + 
+  labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Naive Bayes, with its probabilistic approach, can be effective if the
+features, eating habits and physical conditions, independently
+contribute to the probability of obesity. The heatmap shows that the
+model performs well in predicting *Obesity_Type_III*, but has fewer
+correct predictions for the other classes. This reflects that the model
+is not differentiating well between similar classes and, therefore,
+requires further model tuning, or better feature selection, as an
+improvement.
+
+```{r}
+# Evaluate the model performance
+accuracy <- sum(diag(confusionMatrix)) / sum(confusionMatrix)
+precision <- diag(confusionMatrix) / rowSums(confusionMatrix)
+recall <- diag(confusionMatrix) / colSums(confusionMatrix)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+cat("\nAccuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+```
+
+The overall accuracy of the model is 0.48059524, a low level of
+correctness in predictions. Precision values range from 0.291667 to
+0.688172, reflecting the ability of the model to identify true positives
+among all positive predictions. Recall ranges from 0.122807 to 1,
+examining the success in identifying all actual positives, and the
+complete recall was shown only for one class. F1-scores are between
+0.1707317 and 0.8152866, meaning that the model does not have a balanced
+performance across the classes.
+
+## SVM
+
+```{r, warning=FALSE}
+
+# Fit SVM model
+
+svm_model <- svm(x = X_train, y = y_train, type="C-classification", kernel="radial")
+
+# Make predictions on the test set
+svm_predictions <- predict(svm_model, newdata = X_test)
+
+# Create a confusion matrix
+confusionMatrix <- table(Predicted = svm_predictions, Actual = y_test)
+confusion_data <- as.data.frame(as.table(confusionMatrix))
+
+
+# Create the heatmap
+ggplot(confusion_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") + 
+  scale_fill_gradient(low = "steelblue", high = "red") + 
+  geom_text(aes(label = sprintf("%d", Freq)), vjust = 1) + 
+  theme_minimal() + 
+  labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+We also have utilized Support Vector Machine, as it has the complex
+decision boundaries, which allows to effectively investigate the complex
+relationships between features and obesity levels, i.e., not being
+linearly separable. The matrix shows the correct predictions as follows:
+49 for *Insufficient_Weight*, 43 for *Normal_Weight*, 46 for
+*Overweight_Level_I*, 54 for *Overweight_Level_II*, 66 for
+*Obesity_Type_I*, 58 for *Obesity_Type_II*, and 64 for Obesity_Type_III.
+The diagonal dominance support our initial assumption that SVM is
+capable at classifying, validating its application to handle
+non-linearly separable data like *obesity levels*.
+
+```{r}
+# Calculate accuracy
+accuracy <- sum(diag(confusionMatrix)) / sum(confusionMatrix)
+
+# Calculate precision and recall for each class
+precision <- diag(confusionMatrix) / rowSums(confusionMatrix)
+recall <- diag(confusionMatrix) / colSums(confusionMatrix)
+
+# Calculate F1-score for each class
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+cat("\nAccuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+```
+
+The accuracy is high with the value of 0.9047619, indicating that the
+model may correctly predict 90.5% of the outcomes. The precision ranging
+from 0.7540984 to 1 suggests that the model's prediction will be correct
+between 75.41% and 100% of the time. The recall values vary from
+0.754386. This indicates that the model successfully identifies between
+75.44% and 100% of all positive instances for each obesity class. The
+F1-scores also have shown significance, ranging from 0.7678571 to 1,
+demonstrating that the model has a robust performance on classifying
+instances without significant bias or error.
+
+## Decision Tree
+
+```{r}
+# Fit Decision Tree model
+y_train <- as.factor(y_train)
+train_data <- data.frame(y_train, X_train)
+dt_model <- rpart(y_train ~ ., data = train_data, method="class")
+test_data <- data.frame(y_test, X_test)
+dt_predictions <- predict(dt_model, newdata = test_data, type = "class")
+
+# Create a confusion matrix
+confusionMatrix <- table(Predicted = dt_predictions, Actual = test_data$y_test)
+confusion_data <- as.data.frame(as.table(confusionMatrix))
+
+# Create the heatmap
+ggplot(confusion_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "steelblue", high = "red") +
+  geom_text(aes(label = sprintf("%d", Freq)), vjust = 1) +
+  theme_minimal() +
+  labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+As our dataset includes a lifestyle factors, medical measurements, and
+demographic information, for ease of interpretation and
+straightforwardness in visualization, we employed decision tree, as it
+can handle both numerical and categorical data and are capable of
+modeling complex relationships. Regarding the confusion matrix the
+models' performance was high in classifying true positives.
+
+```{r}
+# Calculate accuracy
+accuracy <- sum(diag(confusionMatrix)) / sum(confusionMatrix)
+
+# Calculate precision and recall for each class
+precision <- diag(confusionMatrix) / rowSums(confusionMatrix)
+recall <- diag(confusionMatrix) / colSums(confusionMatrix)
+
+# Calculate F1-score for each class
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+cat("\nAccuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+
+```
+
+The overall accuracy of the model is 0.8571429, so 85.71% of the
+outcomes are correctly predicted. Precision values for individual
+classes varies from 0.6666667 and 1, proving a high likelihood that the
+model's positive predictions are correct. Recall values, which range
+from 0.6315789 to 1, indicates that the model is capable of detecting
+true positives. F1-Score's presence in between 0.6942149 and 1
+demonstrates that the model is well performing.
+
+### Visualization of Decision Tree
+
+```{r, warning=FALSE}
+# Visualize the tree
+library(rpart.plot)
+rpart.plot(dt_model)
+```
+
+## Random Forest
+
+However, decision tree has a possibility of overfitting, which may
+create the model that is too complex and fail to generalize. Hence, we
+have further applied random forest.
+
+```{r}
+rf_model <- randomForest(y_train ~ ., data = train_data, ntree=500, importance=TRUE)
+rf_predictions <- predict(rf_model, newdata = test_data)
+
+# Create a confusion matrix
+confusionMatrix <- table(Predicted = rf_predictions, Actual = test_data$y_test)
+confusion_data <- as.data.frame(as.table(confusionMatrix))
+
+# Create the heatmap
+ggplot(confusion_data, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") + 
+  scale_fill_gradient(low = "steelblue", high = "red") + 
+  geom_text(aes(label = sprintf("%d", Freq)), vjust = 1) + 
+  theme_minimal() + 
+  labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Random forest can exhibit complex relationships without facing the risk
+of overfitting. The diagonal cells within the confusion matrix show a
+high number of correct predictions without misclassifications, supported
+by zero values in most of the off-diagonal cells. This heatmap indicates
+an exemplary classification performance.
+
+```{r}
+accuracy <- sum(diag(confusionMatrix)) / sum(confusionMatrix)
+precision <- diag(confusionMatrix) / rowSums(confusionMatrix)
+recall <- diag(confusionMatrix) / colSums(confusionMatrix)
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+cat("\nAccuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+```
+
+The accracy of the model is 0.9380952, followed by precision ranging
+from 0.7361111 to 1, and recall varying from 0.862089 and 1. The
+F1-score is also high from 0.8217054 to 1. These statistics reflect the
+model's high performance, indicating that Random Forest's ensemble
+nature played a role in increasing the performance from a single
+Decision Tree model.
+
+### Random Forest Variable Importance Table
+
+```{r}
+# Get variable importance
+importance(rf_model)
+```
+
+Based on the variable importance from the random forest, we have done
+the analysis based on Mean Decrese Accuracy, or MDA, and Mean
+Decrease Gini, or MDG. MDA measures the decrease in model accuracy
+when the values of a particular variable are permuted randomly, and
+MDG measures the contribution of each feature to the homogeneity of
+the nodes and leaves in the model. Therefore, MDA and MDG, together
+examines the significance of the feature. According to the table,
+*weight* has shown highest importance scores in both MDA and MDG,
+suggesting that it is likely a direct indicator of an obesity. The
+*Age*. *Height*, *FCVC* (frequency of consumption of vegetables), *NCP*
+(number of main meals), *CH2O*, (water intake), *FAF* (physical activity
+frequency), and *TUE* (time using electronic devices), have shown the
+moderate importance. The variables, including *SMOKEno*, *SMOKEyes*,
+*SCCno* (calories consumption monitoring), *SCCyes*, anhd *MTRANS*
+(different types of transportation), particulary for walking, bike, and
+motorbike, shows relatively lower importance, suggesting that these
+factors may have less direct influence on the target variable.
+
+## Converting Obesity Levels to Numeric Scale
+
+```{r}
+data$NObeyesdad <- factor(data$NObeyesdad, levels = c("Insufficient_Weight", "Normal_Weight", 
+                                                      "Overweight_Level_I", "Overweight_Level_II", 
+                                                      "Obesity_Type_I", "Obesity_Type_II", 
+                                                      "Obesity_Type_III"), ordered = TRUE)
+
+data$NObeyesdad_numeric <- as.numeric(data$NObeyesdad)
+head(data)
+```
+
+To further analyze the influence of diverse factors on obesity level, we
+have converted the obesity levels from categorical to numerical scale to
+progress the regressions.
+
+## Linear Regression
+
+```{r}
+# Explanatory variables (categorical data) to factor type
+data <- data %>%
+  mutate(Gender = as.factor(Gender),
+         family_history_with_overweight = as.factor(family_history_with_overweight),
+         FAVC = as.factor(FAVC),
+         CAEC = as.factor(CAEC),
+         SMOKE = as.factor(SMOKE),
+         CALC = as.factor(CALC),
+         SCC = as.factor(SCC),
+         MTRANS = as.factor(MTRANS))
+
+model <- lm(NObeyesdad_numeric ~ Gender + Age + Height + family_history_with_overweight + FAVC + FCVC + NCP + CAEC + SMOKE + CH2O + 
+              SCC + FAF + TUE + CALC  + MTRANS + BMI, data = data)
+
+summary(model)
+```
+
+The Multiple R-squared is 0.9637, indicating that approximately 96.37%
+of the obesity variability can be explained by the model. Likewise, the
+Adjusted R-squared of 0.9633, suggests that the model has a very good
+fit. Regarding the coefficients, as the asterisks represent the level of
+statistical significance, the significant independent variables are as
+follows: *GenderMale, Age, family_history_with_overweightyes, FCVC, CAECSometimes, FAF, CALCSometimes, MTRANSPublic_Transportation, and BMI.*
+
+## Polynomical Regression
+
+```{r}
+# Polynomial Regression
+model_poly <- lm(NObeyesdad_numeric ~ Gender + Age + I(Age^2) + Height + BMI + I(BMI^2) + family_history_with_overweight + 
+                   FAVC + FCVC + NCP + CAEC + SMOKE + CH2O + SCC + FAF + TUE + CALC + MTRANS, data = data)
+
+summary(model_poly)
+```
+
+For polynomial regression, to capture the nonlinear relationships and
+increase the model flexibility, regarding that relationship between
+*Age* and *BMI* with *Obesity* may illustrate the U-shaped pattern,
+obesity being increased to a certain age and then decrease, we included
+the terms *Age\^2* and *BMI\^2*. The Multiple R-squared is 0.9684,
+indicating that approximately 96.84% of the obesity variability can be
+explained by the model. The Adjusted R-squared of 0.9681 portrays that
+the model has a very good fit. Regarding the coefficients, as the
+asterisks represent the level of statistical significance, the
+significant independent variables are as follows: *GenderMale, Age, Age\^2, Height, BMI, BMI\^2, NCP, CAEC (Sometimes, Frequently, and Always), FAF, CALCSometimes, MTRANSPublic_Transportation.* As the
+coefficient of *Age\^2* is negative, the polynomial regression further
+captures the nonlinear effect of age.
+
+## Random Forest with Numeric Obesity Level
+
+```{r, message=FALSE}
+# Preprocess numerical data
+prep_p_num <- preProcess(data[, -which(names(data) %in% c("NObeyesdad", "BMI"))], method = c("center", "scale"))
+data_normalized_num <- predict(prep_p_num, data[, -which(names(data) %in% c("NObeyesdad", "BMI"))])
+data_normalized_num$NObeyesdad_numeric <- data$NObeyesdad_numeric
+
+# Train vs test
+set.seed(123)
+index_numeric <- createDataPartition(data_normalized_num$NObeyesdad_numeric, p = 0.8, list = FALSE)
+trainset_num <- data_normalized_num[index_numeric, ]
+testset_num <- data_normalized_num[-index_numeric, ]
+
+X_train_num <- trainset_num[, -which(names(trainset_num) == "NObeyesdad_numeric")]
+X_test_num <- testset_num[, -which(names(testset_num) == "NObeyesdad_numeric")]
+y_train_num <- trainset_num[["NObeyesdad_numeric"]]
+y_test_numeric <- testset_num[["NObeyesdad_numeric"]]
+dn <- dummyVars(" ~ .", data = X_train_num)
+X_train_num <- predict(dn, newdata = X_train_num)
+X_test_num <- predict(dn, newdata = X_test_num)
+
+# Random Forest Model
+rf_model_numeric <- randomForest(y_train_num ~ ., data = as.data.frame(cbind(X_train_num, y_train_num)), ntree=500, importance=TRUE)
+rf_predictions_numeric <- predict(rf_model_numeric, newdata = X_test_num)
+
+# Scatter plot
+ggplot(data = data.frame(y_test_numeric, rf_predictions_numeric), aes(x = y_test_numeric, y = rf_predictions_numeric)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(x = "Actual Values", y = "Predicted Values") + theme_minimal()
+```
+
+```{r}
+# RMSE
+rmse <- sqrt(mean((rf_predictions_numeric - y_test_numeric)^2))
+print(paste("RMSE = ", rmse))
+
+# R-squared
+r_sq <- cor(rf_predictions_numeric, y_test_numeric)^2
+print(paste("R-squared = ", r_sq))
+```
+
+Root Mean Square Error, or RMSE, measures the average size of the
+errors between the predicted and actual outcomes, and lower RMSE
+confirms the high accuracy in prediction. The RMSE value of the model
+is 0.257060390474687, reflecting that the model's predictions are
+significantly close to the actual values. Moreover, R-squared value of
+the model with 0.984430086580748 denotes that the model has extremely
+good fit.
+
+While the regression and classification model are not directly
+comparable, as they are applicable for different types of problems, the
+results present that the both models are well performing.
+
+# Limitations
+
+For the limitation, our dataset may have biased towards certain cultural
+or ethnic backgrounds. The data was collected from Mexico, Peru, and
+Columbia. However, eating habits and physical conditions may differ in
+different regions with different cultures, including food and habits,
+and different ethnicities with different genetic compositions.
+
+Furthermore, there is a difference in the distribution of obesity
+levels. While obesity follows a normal distribution in the real world,
+our sample data follows the uniform distribution, which could indicate
+the sampling bias. However, the uniformity may have been beneficial in
+the data analysis process, due to the lower likeness of overfitting to
+the majority class and better generalisation.
+
+# Conclusions
+
+In this report, the dataset, including the physical conditions and
+eating habits, was tackled in detail to examine which factors attribute
+most to the obesity. Overall, the classification models, excluding the
+Naive Bayes, and regression models exhibited good performance and,
+through these methods we employed, it was demonstrated that while
+physical conditions such as weight inherently have a significant impact
+on obesity, eating habits and life patterns also substantially affect
+one's obesity level.
